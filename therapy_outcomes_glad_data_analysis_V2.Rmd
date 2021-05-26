@@ -1,0 +1,468 @@
+---
+title: "Data analysis: Patient characteristics associated with prognosis following psychological therapy for anxiety or depressive disorders - a cohort of GLAD study participants"
+author: "Rayner et al. 2021"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: monochrome
+    number_sections: no
+    theme: paper
+---
+
+```{css, include = F, echo = F, eval = T} 
+
+.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.nobullet li {
+  list-style-type: none;
+}
+.table {
+  max-width: 1600px;
+}
+.table.center {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+```
+
+```{r "settings", include = F, echo = F, warning = F}
+knitr::opts_chunk$set(echo = TRUE,
+                      comment=NA,
+                      prompt = F,
+                      cache = F)
+remove(list = ls())
+
+source("/Users/Chris/King's College London/MT-TNG BioResource EDIT - Rayner_Chris - CRayner-10-30-2020/4_therapy_outcomes_glad_config")
+
+.libPaths(paste0(lib_paths))
+
+library(tidyverse)
+library(data.table)
+library(knitr)
+library(arsenal)
+library(jtools)
+library(rms)
+# library(broom)
+
+```
+
+## Data analysis {.tabset}
+
+### 1. Load data
+
+```{r Load data, eval = T, include = F,  echo = F, warning = F}
+
+data <- readRDS(paste0(working_dir, "THO_ANXDEP_ANALYSIS_DATASET.RDS")) %>%
+        dplyr::select(  "TT1_Self_reported_change",
+                        "TT1_Years_since_therapy",
+                        "TT1_Main_diagnosis",
+                        "TT1_Therapy_type",
+                        "TT1_Concurrent_medications",
+                        "SCR_First_therapy",
+                        "SCR_Regular_therapeutic_activity",
+                        "SEV_Age_of_onset",
+                        "SEV_Number_of_episodes",
+                        "TT1_Number_of_comorbidities",
+                        "SEV_Personality_disorder_score",
+                        "TT1_Age_during_therapy",
+                        "DEM_Sex",
+                        "DEM_Ethnicity_binary",
+                        "DEM_University_degree",
+                        "THO_Missing_data") %>%
+         filter(!is.na(TT1_Self_reported_change)) %>%
+         filter(!is.na(TT1_Years_since_therapy)) %>%
+         mutate(TT1_Main_diagnosis=relevel(TT1_Main_diagnosis, "Depression")) %>%
+         mutate(TT1_Therapy_type=relevel(TT1_Therapy_type, "Individual_cbt")) %>%
+         mutate(DEM_Ethnicity=relevel(DEM_Ethnicity_binary, "White_british")) %>%
+         mutate(TT1_Self_reported_change = recode_factor(TT1_Self_reported_change, 
+                                                           `Much worse` = 1,
+                                                           `A little worse` = 2,
+                                                           `No change` = 3,
+                                                           `A little better` = 4, 
+                                                           `Much better` = 5,
+                                                           .ordered = TRUE)) %>%
+        filter(TT1_Age_during_therapy > 17) 
+
+miss <- data %>%
+              mutate_if(is.factor,
+              funs(factor(replace(as.character(.), is.na(.), "ZMD")))) %>%
+              mutate(SEV_Number_of_episodes_missing = ifelse(is.na(SEV_Number_of_episodes), 1,0)) %>%
+              mutate_if(is.integer, funs(replace(as.integer(.), is.na(.), mean(., na.rm=T)))) %>%
+              mutate(TT1_Therapy_type=relevel(TT1_Therapy_type, "Individual_cbt")) %>%
+              mutate(TT1_Main_diagnosis=relevel(TT1_Main_diagnosis, "Depression")) %>%
+              mutate(DEM_Ethnicity=relevel(DEM_Ethnicity, "White_british")) 
+
+d1 <- data %>%
+               droplevels() %>%
+               dplyr::select(-THO_Missing_data)
+
+m1 <- miss %>% 
+               droplevels() %>%
+               dplyr::select(-THO_Missing_data)
+
+# Create nicer variable labels for plots and tables 
+data_labels <- paste(colnames(data), sep = ",")
+data_labels <- str_to_sentence(str_sub(str_replace_all(data_labels, "_", " "), 5, -1))
+data_label_list <- list()
+for (v in 1:length(data)) {data_label_list[[paste(names(data)[v])]] <- paste(data_labels)[v]}
+
+```
+
+### 2. Make labels for plots and final reformatting of variables
+
+
+```{r "MAKE LABELS FOR PLOTS & REFORMAT VARIABLES FOR ANALYSIS", include = F,  echo = F, warning = F, error = F, message = F}
+# the following function collapses the variable names and factor levels into two lists - one is the exposure as it will be labelled in the regression output, the other list contains nicer labels, for when we make plots later
+
+out <- c("TT1_Self_reported_change")
+exp <- setdiff(names(miss), out)
+
+collapse_factor_name_level <- function(var_name, var_level){
+  output_level <- paste(var_name, var_level, sep = "=", collapse = " , ")
+}
+
+collapse_factor_name_label <- function(var_name, var_label){
+  output_label <- paste(var_name, var_label, "_", sep = "__", collapse = " , ")
+  output_label <- str_replace_all(output_label, "___", ")")
+  output_label <- str_replace_all(output_label, "__", " (")
+  output_label <- str_replace_all(output_label, "=", " (")
+  output_label <- str_replace_all(output_label, "_", " ")
+  output_label <- str_replace_all(output_label, "\\.", " ")
+  output_label <- str_replace_all(output_label, "ZMD", "Missing")
+}
+add_name_label <- function(var_name){
+  output_label <- str_replace_all(var_name, "___", ")")
+  output_label <- str_replace_all(output_label, "__", " (")
+  output_label <- str_replace_all(output_label, "=", " (")
+  output_label <- str_replace_all(output_label, "_", " ")
+  output_label <- str_replace_all(output_label, "\\.", " ")
+  output_label <- str_replace_all(output_label, "\\.", " ")
+  output_label <- str_replace_all(output_label, "ZMD", "Missing")
+}
+
+# Run the functions from above
+results_levels_list <- list()
+
+for (n in names(miss)[names(miss) != c(out)]){
+  if (is.factor(miss[[n]])) {
+    for (l in levels(miss[[n]])) {
+      results_levels_list[[(paste(collapse_factor_name_level(n, l)))]] <- 
+        paste(collapse_factor_name_level(n, l))
+    } 
+    } else {
+      results_levels_list[[(paste(n))]] <- paste(n)
+  }
+}
+
+results_labels_list <- list()
+
+for (n in names(miss)[names(miss) != c(out)]){
+  if (is.factor(miss[[n]])) {
+    for (l in levels(miss[[n]])) {
+      results_labels_list[[(paste(collapse_factor_name_label(n, l)))]] <- 
+        paste(collapse_factor_name_label(n, l))
+    } 
+    } else {
+      results_labels_list[[(paste(n))]] <- paste(add_name_label(n))
+  }
+}
+
+```
+
+### 4. Run ordinal regression loops
+
+```{r "run regression loop - lifetime", echo = T, include = T, eval = T, warning = F}
+
+mv_ord_reg <- function(dat, outcome, predictor) {
+  predictors <- paste(predictor, collapse = " + ")
+  regression_formula <- paste(outcome, predictors, sep = " ~ ")
+  lrm(as.formula(regression_formula), data = dat, x = T, y = T)
+}
+
+# Univariable regression formula function
+uv_ord_reg <- function(dat, outcome, predictor) {
+  predictor <- paste0(predictor)
+  regression_formula <- paste(outcome, predictor, sep = " ~ ")
+  lrm(as.formula(regression_formula), data = dat)
+}
+
+ord_reg_table = function(x) {
+  output = capture.output(print(x))
+  coef_lines = output[which(str_detect(output, "Coef\\s+S\\.E\\.")):(length(output) - 1)]
+  coef_table = suppressWarnings(readr::read_table(coef_lines %>% stringr::str_c(collapse = "\n")))
+  names(coef_table) <- c("Variable", "LOG_ODDS", "SE", "Z", "P")
+  coef_table$OR <- as.numeric(round(exp(as.numeric(coef_table$LOG_ODDS)),3))
+  return(coef_table)
+}
+
+set.seed(12345)
+out <- "TT1_Self_reported_change"
+
+# Run multivariable regression loop
+rm(results, results_table)
+results <- list()
+results_table <- list()
+model_stats <- list()
+
+p <- setdiff(names(d1),  c("TT1_Self_reported_change"))
+s <- setdiff(names(m1),  c("TT1_Self_reported_change"))
+
+for (sample in c('d1',#'d2',
+                  'm1' #,'m2'
+                 )) {
+  for (outcome in c(out)) {
+          if(sample=='d1'){ #} | sample=='d2'){
+            for (model in 'p') {
+      results[[paste(sample, model, outcome, "mv", sep = '.')]] <- mv_ord_reg(get(sample), outcome, get(model))
+      results_table[[paste(sample, model, outcome, "mv", sep = '.')]] <- ord_reg_table(results[[paste(sample, model, outcome, "mv", sep ='.')]])
+      results_table[[paste(sample, model, outcome, "mv", sep = '.')]]$Model <-"MV"
+      results_table[[paste(sample, model, outcome, "mv", sep = '.')]]$Outcome <-paste(outcome)
+      results_table[[paste(sample, model, outcome, "mv", sep = '.')]]$Analysis <-paste(sample)
+      model_stats[[paste(sample, model, outcome, "mv", sep = '.')]] <- results[[paste(sample, model, outcome, "mv", sep = '.')]]$stats
+      results_table[[paste(sample, model, outcome, "mv", sep = '.')]]$N <- model_stats[[paste(sample, model, outcome, "mv", sep = '.')]][1]
+      results_table[[paste(sample, model, outcome, "mv", sep = '.')]]$R2 <- round(model_stats[[paste(sample, model, outcome, "mv", sep = '.')]][10],4)
+        }
+      } else {
+          if(sample=='m1'){ # | sample=='m2'){
+            for (model in 's') {
+      results[[paste(sample, model, outcome, "mm", sep = '.')]] <- mv_ord_reg(get(sample), outcome, get(model))
+      results_table[[paste(sample, model, outcome, "mm", sep = '.')]] <- ord_reg_table(results[[paste(sample, model, outcome, "mm", sep ='.')]])
+      results_table[[paste(sample, model, outcome, "mm", sep = '.')]]$Model <-"MM"
+      results_table[[paste(sample, model, outcome, "mm", sep = '.')]]$Outcome <-paste(outcome)
+      results_table[[paste(sample, model, outcome, "mm", sep = '.')]]$Analysis <-paste(sample)
+      model_stats[[paste(sample, model, outcome, "mm", sep = '.')]] <- results[[paste(sample, model, outcome, "mm", sep = '.')]]$stats
+      results_table[[paste(sample, model, outcome, "mm", sep = '.')]]$N <- model_stats[[paste(sample, model, outcome, "mm", sep = '.')]][1]
+      results_table[[paste(sample, model, outcome, "mm", sep = '.')]]$R2 <- round(model_stats[[paste(sample, model, outcome, "mm", sep = '.')]][10],4)
+      }
+      }
+  }
+  }
+}
+
+# Run univariable 
+for (sample in c('d1',#'d2',
+                  'm1' #,'m2'
+                 )) {
+  for (outcome in c(out)) {
+          if(sample=='d1'){ #} | sample=='d2'){
+            for (model in c(p)) {
+      results[[paste(sample, model, outcome, "uv", sep = '.')]] <- uv_ord_reg(get(sample), outcome, model)
+      results_table[[paste(sample, model, outcome, "uv", sep = '.')]] <- ord_reg_table(results[[paste(sample, model, outcome, "uv", sep ='.')]])
+      results_table[[paste(sample, model, outcome, "uv", sep = '.')]]$Model <- "UV"
+      results_table[[paste(sample, model, outcome, "uv", sep = '.')]]$Outcome <-paste(outcome)
+      results_table[[paste(sample, model, outcome, "uv", sep = '.')]]$Analysis <-paste(sample)
+      model_stats[[paste(sample, model, outcome, "uv", sep = '.')]] <- results[[paste(sample, model, outcome, "uv", sep = '.')]]$stats
+      results_table[[paste(sample, model, outcome, "uv", sep = '.')]]$N <- model_stats[[paste(sample, model, outcome, "uv", sep = '.')]][1]
+      results_table[[paste(sample, model, outcome, "uv", sep = '.')]]$R2 <- round(model_stats[[paste(sample, model, outcome, "uv", sep = '.')]][10],4)
+            }
+      } else {
+          if(sample=='m1'){ # | sample=='m2'){
+            for (model in c(s)) {
+      results[[paste(sample, model, outcome, "um", sep = '.')]] <- mv_ord_reg(get(sample), outcome, model)
+      results_table[[paste(sample, model, outcome, "um", sep = '.')]] <- ord_reg_table(results[[paste(sample, model, outcome, "um", sep ='.')]])
+      results_table[[paste(sample, model, outcome, "um", sep = '.')]]$Model <-"UM"
+      results_table[[paste(sample, model, outcome, "um", sep = '.')]]$Outcome <-paste(outcome)
+      results_table[[paste(sample, model, outcome, "um", sep = '.')]]$Analysis <-paste(sample)
+      model_stats[[paste(sample, model, outcome, "um", sep = '.')]] <- results[[paste(sample, model, outcome, "um", sep = '.')]]$stats
+      results_table[[paste(sample, model, outcome, "um", sep = '.')]]$N <- model_stats[[paste(sample, model, outcome, "um", sep = '.')]][1]
+      results_table[[paste(sample, model, outcome, "um", sep = '.')]]$R2 <- round(model_stats[[paste(sample, model, outcome, "um", sep = '.')]][10],4)
+      }
+      }
+  }
+  }
+}
+
+```
+
+### 5. Combine and reformat results
+
+```{r "COMBINE AND REFORMAT RESULTS", include = F,  echo = F, warning = F}
+# Combine all data.frames
+Bonf <- 0.0038
+
+results_table_all <- do.call(rbind, results_table)
+
+results_table_all <- results_table_all %>%
+    mutate(Variable = droplevels(
+                      factor(Variable,
+                             levels = paste(results_levels_list, sep = ", "),
+                             labels = paste(results_labels_list, sep = ", ")))) %>%
+    mutate(Outcome =  factor(Outcome,
+                             levels = c("TT1_Self_reported_change" ),
+                             labels = c("Self-rated therapy outcome"))) %>%
+    mutate(Model  =    factor(Model,    
+                             levels = c('MM', 'UM', 'MV', 'UV'),
+                             labels = c('Multivariable', 'Univariable', 'Multivariable cc', 'Univariable cc'))) %>%
+    mutate(Significance =    ifelse(P <= Bonf,   
+                             paste0("Bonferroni p < ", Bonf), paste0("p > ", Bonf))) %>%
+    mutate(OR = round(exp(as.numeric(LOG_ODDS)), 3)) %>%
+    mutate(LCI = round(exp(as.numeric(LOG_ODDS - (1.96 * SE))), 3)) %>%
+    mutate(UCI = round(exp(as.numeric(LOG_ODDS + (1.96 * SE))), 3)) %>%
+    mutate(`95% CI` = paste0("[",round(LCI, 2),",",round(UCI, 2),"]")) %>%
+    mutate(Facet = ifelse(
+                          grepl("Years since therapy", Variable) |
+                           grepl("Therapy type", Variable) |
+                           grepl("First therapy", Variable) |
+                           grepl("Regular therapeutic", Variable) |
+                           grepl("Main diagnosis", Variable) |
+                           grepl("Concurrent med", Variable),
+                          "Therapy factors",
+                      ifelse(
+                          Variable == "TT1 Age during therapy" |
+                          grepl("DEM", Variable),
+                          "Sociodemographic factors",
+                      ifelse(
+                          Variable == "TT1 Number of comorbidities" |
+                          grepl("SEV", Variable),
+                          "Clinical factors",
+                      ifelse(
+                          grepl("issing", Variable), 
+                          "Missing data",
+                          NA
+                          ))))) %>%
+      mutate(Figure_label = str_replace_all(as.character(Variable), "_"," ")) %>%
+      mutate(Figure_label = str_replace_all(Figure_label, " during therapy", "")) %>%
+      mutate(Figure_label = str_replace_all(Figure_label, "Panic fear or phobia", "Panic/phobia")) %>%
+      mutate(Figure_label = str_replace_all(Figure_label, "Main diagnosis", "Diagnosis")) %>%
+      mutate(Figure_label = str_replace_all(Figure_label, "Individual c", "C")) %>%
+      mutate(Figure_label = str_replace_all(Figure_label, "ethnic ", "")) %>%
+      mutate(Figure_label = str_replace_all(Figure_label, "Personality disorder score", "Personality symptoms")) %>%      
+      mutate(Figure_label = str_replace_all(Figure_label, "Concurrent medications", "Concurrent meds")) %>%
+      mutate(Figure_label = str_replace_all(Figure_label, "Regular therapeutic activity", "Regular activity")) %>%
+      mutate(Figure_label = str_replace_all(Figure_label, " (Yes)", "")) %>%
+      mutate(Figure_label = str_sub(Figure_label,5,-1)) %>%
+      filter(!is.na(Variable))
+
+maxChars = sapply(as.character(results_table_all$Figure_label), function(.) {  max(nchar(.)) })
+format.labels = function(Variable_name) { str_pad(Variable_name, max(maxChars) + 2, pad = " ")}
+results_table_all$Figure_label <- paste(format.labels(results_table_all$Figure_label))
+order_labels <-  paste(unique(results_table_all$Figure_label[order(results_table_all[["Variable"]])], sep = ","))
+results_table_all$Figure_label <- factor(results_table_all$Figure_label, levels = paste(order_labels))
+row.names(results_table_all) <- NULL
+
+saveRDS(results_table_all, paste0(working_dir,"therapy_outcomes_ordinal_regression_results.rds"))
+
+```
+
+### X. Brant test 
+
+```{r, "Brant test - assessing proportionality",  eval = T, echo = F, warning = F}
+
+test <- MASS::polr(
+                   TT1_Self_reported_change ~   
+                                         TT1_Main_diagnosis + 
+                                         TT1_Therapy_type + 
+                                         TT1_Concurrent_medications + 
+                                         SCR_First_therapy + 
+                                         SCR_Regular_therapeutic_activity + 
+                                         SEV_Age_of_onset + 
+                                         SEV_Number_of_episodes + 
+                                         TT1_Number_of_comorbidities + 
+                                         SEV_Personality_disorder_score + 
+                                         TT1_Age_during_therapy + 
+                                         DEM_Sex + 
+                                         DEM_Ethnicity + 
+                                        DEM_University_degree, 
+            data = d1, 
+            Hess=TRUE
+            )
+
+library(pacman); p_load(brant)
+
+br <- as.data.frame(brant(test)) %>%
+      rownames_to_column(., "Variable") %>%
+      # H0: Parallel Regression Assumption holds
+      mutate(Variable = str_replace_all(Variable, "TT1_|SCR_|SEV_|DEM_", ""))
+
+fwrite(br, paste0(working_dir,"therapy_outcomes_regression_brant.csv"), sep=",")
+
+```
+
+
+### 6. Two sample z-tests
+
+```{r, "Two sample z-tests on all pairs of associations",  eval = T, echo = F, warning = F}
+
+ztab <- results_table_all %>%
+              select(Variable,LOG_ODDS,SE,Model) %>%
+              mutate(Variable = as.character(str_replace_all(as.character(Variable), " ", "_"))) %>%
+              mutate(Model = as.character(str_replace_all(as.character(Model), " ", "_")))
+
+Two_sample_Z <- function(est1, se1, est2, se2){
+  Z <- round( (est1 - est2) / sqrt(se1^2 + se2^2), 2)
+  P <- as.numeric(formatC(2*pnorm(-abs(as.numeric(Z))), format = "e", digits = 2))
+  return(data.frame(Z_score = Z, P_value = P))
+  }
+
+rm(z_tests)
+z_tests <- list()
+n_lines = nrow(ztab)
+
+for (i in (seq(1, (n_lines-1)))){
+  k = i
+    for (j in (seq(k + 1, ( n_lines )))){
+      variable1 = ztab[i,"Variable"]
+      variable2 = ztab[j,"Variable"]
+      model1    = ztab[i,"Model"]
+      model2    = ztab[j,"Model"]
+      est1      = ztab[i,"LOG_ODDS"]
+      est2      = ztab[j,"LOG_ODDS"]
+      se1       = ztab[i,"SE"]
+      se2       = ztab[j,"SE"]
+    
+      if(variable1==variable2){ 
+      z_tests[[paste(variable1,model1,model2,sep='.')]] <- Two_sample_Z(
+                                                           est1 = as.numeric(paste0(est1)), 
+                                                           se1 =  as.numeric(paste0(se1)),
+                                                           est2 = as.numeric(paste0(est2)),
+                                                           se2 =  as.numeric(paste0(se2)))
+      z_tests[[paste(variable1,model1,model2,sep='.')]]$Variable <- paste0(variable1)
+      z_tests[[paste(variable1,model1,model2,sep='.')]]$Model_1 <- paste0(model1)
+      z_tests[[paste(variable1,model1,model2,sep='.')]]$Model_2 <- paste0(model2) 
+      z_tests[[paste(variable1,model1,model2,sep='.')]]$OR_1 <- round(exp(as.numeric(paste0(est1))),2)
+      z_tests[[paste(variable1,model1,model2,sep='.')]]$OR_2 <- round(exp(as.numeric(paste0(est2))),2) 
+      z_tests[[paste(variable1,model1,model2,sep='.')]]$EST_1 <- round(as.numeric(paste0(est1)),4)
+      z_tests[[paste(variable1,model1,model2,sep='.')]]$EST_2 <- round(as.numeric(paste0(est2)),4)       
+      z_tests[[paste(variable1,model1,model2,sep='.')]]$SE_1 <-  round(as.numeric(paste0(se1)),4)
+      z_tests[[paste(variable1,model1,model2,sep='.')]]$SE_1 <-  round(as.numeric(paste0(se2)),4) 
+    }
+    }
+}
+
+z_tests_all <- do.call(bind_rows,z_tests) %>%
+               remove_rownames(.) %>%
+               na.omit(.) %>%
+               mutate(Variable = str_to_sentence(str_sub(str_replace_all(Variable, "_", " "), 5, -1))) %>%
+               dplyr::select(Variable,Model_1,  Model_2,  OR_1,  OR_2,  Z_score,  P_value )
+
+saveRDS(z_tests_all, paste0(working_dir,"therapy_outcomes_ztest_ordinal_results.rds"))
+
+```
+
+### 8. Variance inflation factors
+
+```{r "calculate variance inflation factors", echo = T, include = T, eval = F, warning = F}
+
+vif <- 
+    as.data.frame(
+    jtools::summ(
+      results$m1.s.TT1_Self_reported_improvement.mm,
+      exp = TRUE,
+      vifs = TRUE,
+      digits = 2
+    )$coeftable 
+    ) %>%
+    rownames_to_column(., "Variable") %>%
+    mutate(Variable = str_sub(Variable, 5, -1)) %>%
+    dplyr::select(Variable, VIF) %>%
+    slice(-1)
+
+fwrite(vif, paste0(working_dir,"therapy_outcomes_regression_vif.csv"), sep=",")
+
+
+```

@@ -1,0 +1,986 @@
+---
+title: "Data cleaning: Patient characteristics associated with prognosis following psychological therapy for anxiety or depressive disorders - a cohort of GLAD study participants"
+author: "Rayner et al. 2021"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: monochrome
+    number_sections: no
+    theme: paper
+---
+
+
+```{css, include = F, echo = F, eval = T} 
+
+.main-container {
+  max-width: 2000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.nobullet li {
+  list-style-type: none;
+}
+.table {
+  max-width: 1600px;
+}
+.table.center {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+```
+
+```{r, "settings", include = F, echo = F, eval = T}
+knitr::opts_chunk$set(echo = T, comment = NA,  prompt = F,  cache = F)
+remove(list = ls())
+
+source("/Users/Chris/King's College London/MT-TNG BioResource EDIT - Rayner_Chris - CRayner-10-30-2020/4_therapy_outcomes_glad_config")
+
+.libPaths(paste0(lib_paths))
+
+library(tidyverse)
+library(data.table)
+library(knitr)
+library(arsenal)
+
+```
+
+# Clean THO-Q 
+
+```{r "load and clean tho q", eval = T, include = F,  echo = F, warning = F}
+
+tho <- fread(paste(working_dir, "Therapy_seeking_and_therapy_outcomes_GLAD.csv", sep = "/"), 
+              na.strings = c("",-88,-99,-77), data.table = F) %>% 
+        slice(-(1:2)) %>%
+        dplyr::select(
+                 THO_Start_date = StartDate,
+                 ExternalReference,
+                 SCR_Have_you_ever_tried_Talking_therapy = Q2_1,
+                 SCR_Have_you_ever_tried_Structured_therapeutic_activity = Q2_2,
+                 SCR_Have_you_tried_talking_therapy_more_than_once = Q3,
+                 SCR_Have_you_tried_more_than_one_type_of_structured_therapeutic_activity = Q4,
+                 TT1_Age_during_therapy = Q16, 
+                 TT1_Main_diagnosis = Q17, 
+                 TT1_Specify_other_main_diagnosis = Q28, 
+                 TT1_Comorbid = Q18, 
+                 TT1_Specify_other_comorbidity = Q29, 
+                 TT1_Individual_or_group_therapy = Q5, 
+                 TT1_Type_of_therapy = Q6, 
+                 TT1_Specify_other_type = Q39, 
+                 TT1_Self_reported_change = Q7, 
+                 TT1_Concurrent_medications = Q19, 
+                 TT2_Age_during_therapy = Q20,
+                 TT2_Main_diagnosis = Q21,
+                 TT2_Specify_other_main_diagnosis = Q30,
+                 TT2_Comorbid = Q22,
+                 TT2_Specify_other_comorbidity = Q31, 
+                 TT2_Individual_or_group_therapy = Q8,
+                 TT2_Type_of_therapy = Q9,
+                 TT2_Specify_other_type = Q37,
+                 TT2_Self_reported_change = Q10,
+                 TT2_Concurrent_medications = Q23,
+                 SA1_Type_of_activity = Q11, 
+                 SA1_Specify_other_type = Q36, 
+                 SA1_Self_reported_change = Q12, 
+                 SA1_Main_symptoms = Q24,
+                 SA1_Specify_other_symptoms = Q33, 
+                 SA1_Concurrent_medications = Q25, 
+                 SA2_Type_of_activity = Q13, 
+                 SA2_Specify_other_type = Q34, 
+                 SA2_Self_reported_change = Q14, 
+                 SA2_Main_symptoms = Q26,
+                 SA2_Specify_other_symptoms = Q35, 
+                 SA2_Concurrent_medications = Q27)  %>%
+  
+  mutate(ID = as.character(ExternalReference)) %>%
+  mutate_at(vars(contains("date")),  list(~as.Date(str_sub(., 1, 11), "%d/%m/%y"))) %>%
+  mutate_at(vars(contains("Age")), list(~as.integer(.))) %>%
+  mutate_at(vars(contains("Type_of")),  list(~recode_factor(., 
+                                                                  `Cognitive behavioral therapy (CBT)` = "Cbt",
+                                                                  `Cognitive behavioural therapy (CBT)` = "Cbt"))) %>%  
+  
+  mutate_at(vars(contains("Individual")), list(~recode_factor(.,  `One-to-one` = "Individual"))) %>%
+
+  mutate(TT1_Concurrent_medications = ifelse(grepl('depressant|anxiety', TT1_Concurrent_medications), 'Yes',
+                                      ifelse(grepl('No', TT1_Concurrent_medications), 'No', NA)))  %>% 
+
+  mutate(TT2_Concurrent_medications = ifelse(grepl('depressant|anxiety', TT2_Concurrent_medications), 'Yes',
+                                      ifelse(grepl('No', TT2_Concurrent_medications), 'No', NA)))  %>% 
+  
+  mutate(TT1_Therapy_type = 
+           ifelse(TT1_Individual_or_group_therapy=="Don't know" | TT1_Type_of_therapy=="Don't know", "Don't know",
+           ifelse(TT1_Individual_or_group_therapy=="Prefer not to answer" | TT1_Type_of_therapy=="Prefer not to answer", "Prefer not to answer",
+           ifelse(is.na(TT1_Individual_or_group_therapy) | is.na(TT1_Type_of_therapy), NA,
+                  paste0(as.character(TT1_Individual_or_group_therapy), " ", as.character(TT1_Type_of_therapy)))))) %>%
+
+  mutate(TT2_Therapy_type = 
+           ifelse(TT2_Individual_or_group_therapy=="Don't know" | TT2_Type_of_therapy=="Don't know", "Don't know",
+           ifelse(TT2_Individual_or_group_therapy=="Prefer not to answer" | TT2_Type_of_therapy=="Prefer not to answer", "Prefer not to answer",
+           ifelse(is.na(TT2_Individual_or_group_therapy) | is.na(TT2_Type_of_therapy), NA,
+                  paste0(as.character(TT2_Individual_or_group_therapy), " ", as.character(TT2_Type_of_therapy)))))) %>%
+  
+  mutate(SCR_Tried_therapy =          factor(ifelse(SCR_Have_you_ever_tried_Talking_therapy=="No", "Never",
+                                             ifelse(SCR_Have_you_ever_tried_Talking_therapy=="Yes" & 
+                                                    SCR_Have_you_tried_talking_therapy_more_than_once=="Yes", "More than once",
+                                             ifelse(SCR_Have_you_ever_tried_Talking_therapy=="Yes", "Once", NA))),
+                                             levels = c("Never","Once","More than once"))) %>%
+
+    mutate(SCR_Tried_therapy_more_than_once = factor(SCR_Have_you_tried_talking_therapy_more_than_once)) %>%
+  
+    mutate(SCR_First_therapy =       factor(ifelse(SCR_Have_you_tried_talking_therapy_more_than_once=="Yes","No",
+                                            ifelse(SCR_Have_you_tried_talking_therapy_more_than_once=="No","Yes",NA))))  %>%
+  
+    mutate(SCR_Regular_therapeutic_activity = 
+                                     factor(ifelse(SCR_Have_you_ever_tried_Structured_therapeutic_activity=="No", "No",
+                                            ifelse(SCR_Have_you_ever_tried_Structured_therapeutic_activity=="Yes", "Yes", NA)))) %>%
+  
+    mutate(TT1_Self_reported_improvement = factor(ifelse(TT1_Self_reported_change== "Much better"  |
+                                                   TT1_Self_reported_change== "A little better", "Yes",
+                                            ifelse(TT1_Self_reported_change== "No change"  | 
+                                                   TT1_Self_reported_change== "A little worse" |
+                                                   TT1_Self_reported_change== "Much worse", "No", NA)))) %>%
+
+    mutate(TT2_Self_reported_improvement = factor(ifelse(TT2_Self_reported_change== "Much better"  |
+                                                   TT2_Self_reported_change== "A little better", "Yes",
+                                            ifelse(TT2_Self_reported_change== "No change"  | 
+                                                   TT2_Self_reported_change== "A little worse" |
+                                                   TT2_Self_reported_change== "Much worse", "No", NA)))) %>%
+
+              mutate(TT1_Comorbid_Depression = ifelse(grepl('Depression|depression', TT1_Comorbid), 1, 0)) %>%
+              mutate(TT1_Comorbid_Panic =    ifelse(grepl('Panic|panic', TT1_Comorbid), 1, 0)) %>%
+              mutate(TT1_Comorbid_Fear =     ifelse(grepl('Fear|fear', TT1_Comorbid), 1, 0)) %>%
+              mutate(TT1_Comorbid_Social =   ifelse(grepl('Social|social', TT1_Comorbid), 1, 0)) %>%
+              mutate(TT1_Comorbid_Anxiety =   ifelse(grepl('Anxiety|,anxiety', TT1_Comorbid), 1, 0)) %>%
+              mutate(TT1_Comorbid_Other =    ifelse(grepl('Other|other', TT1_Comorbid), 1, 0)) %>%
+              mutate(TT1_Number_of_comorbidities =dplyr::select(., contains("TT1_Comorbid_")) %>%  rowSums(na.rm = TRUE)) %>%
+
+              mutate(TT2_Comorbid_Depression = ifelse(grepl('Depression|depression', TT2_Comorbid), 1, 0)) %>%
+              mutate(TT2_Comorbid_Panic =    ifelse(grepl('Panic|panic', TT2_Comorbid), 1, 0)) %>%
+              mutate(TT2_Comorbid_Fear =     ifelse(grepl('Fear|fear', TT2_Comorbid), 1, 0)) %>%
+              mutate(TT2_Comorbid_Social =   ifelse(grepl('Social|social', TT2_Comorbid), 1, 0)) %>%
+              mutate(TT2_Comorbid_Anxiety =   ifelse(grepl('Anxiety|,anxiety', TT2_Comorbid), 1, 0)) %>%
+              mutate(TT2_Comorbid_Other =    ifelse(grepl('Other|other', TT2_Comorbid), 1, 0)) %>%
+              mutate(TT2_Number_of_comorbidities = dplyr::select(., contains("TT2_Comorbid_")) %>%  rowSums(na.rm = TRUE))
+
+tho <- as_tibble(tho)
+
+diag <- tho %>% dplyr::select(contains('Specify')) %>% 
+                      dplyr::select(matches('diag|comorb|symp')) %>% 
+                        mutate_all(funs(str_to_upper(.))) %>% 
+                        mutate_all(~case_when(
+                                    grepl('PND|KILL|SUIC|MOOD|ESTEEM|DEPRESSION|DYSTHY|CONFIDENCE|UNHAPPY', .) ~'DEPRESSION',
+                                    grepl('ANXIETY|WORRY', .) ~'ANXIETY',
+                                    grepl('AGORA', .) ~'FEAR OR PHOBIA',
+                                    #grepl('AGORA', .) ~'PANIC FEAR OR PHOBIA',
+                                   
+                                    grepl('OCD|OCPD|OBSESSIVE', .) ~'OBSESSIVE COMPULSIVE DISORDER',
+
+                                    grepl('BPD|BORD|EUPD|EMOT.*STAB|.*P.*RSONALITY', .) ~'PERSONALITY DISORDER',
+                                    
+                                    grepl('BIP|BI P|BI-P|BP', .) ~'BIPOLAR DISORDER',
+                                    
+                                    grepl('POST|P T S D|P.T.S.D|P. T. S. D|PASS|PT|PST', .)~'POST TRAUMATIC STRESS DISORDER',  
+                                    
+                                    grepl('ALC|ALOC|DRUG|ADDICTION', .)~'ALCOHOL DRUG PROBLEMS',
+                                    
+                                    grepl('ANNOREX|ANOREX', .)~'EATING DISORDER',  
+                                    grepl('BINGE|COMPULSIVE EATING|COMPULSIVE EATING', .) ~'EATING DISORDER',
+                                    grepl('BUL', .) ~'EATING DISORDER',
+                                    grepl('EATING', .) ~'EATING DISORDER',
+                                    grepl('ED', .) ~'EATING DISORDER',
+                                    grepl('DISASS', .) ~'EATING DISORDER',
+                                    
+                                    grepl('BEREAVE|GRIEF|BREAV|DEATH|CARER|SUPPORT|FATHER|INFERTILITY', .) ~'STRESS OR TRAUMA',
+                                    grepl('SEXUAL ABUSE|TRAUMA|VIOLENCE|CHILD|ABUSE|RAPE', .) ~'STRESS OR TRAUMA',
+                                    grepl('WORK|BURNOUT|BURN OUT|STRESS', .) ~'STRESS OR TRAUMA',
+
+                                    TRUE ~ as.character(.)))  %>% 
+                    mutate_all(funs(str_to_sentence(.)))
+ 
+for(i in c(1:ncol(diag))){tho[[paste0(names(diag)[i])]] <- diag[[paste0(names(diag)[i])]]} 
+
+other_diag_values <- str_to_sentence(c('ANXIETY','DEPRESSION','PANIC ATTACKS', 'FEAR OR PHOBIA', 
+                                       'POST TRAUMATIC STRESS DISORDER','PERSONALITY DISORDER',
+                                       'BIPOLAR DISORDER', 'EATING DISORDER'))
+
+type <- tho %>%   dplyr::select(contains('Specify')) %>% 
+                    dplyr::select(contains('type')) %>% 
+                        mutate_all(funs(str_to_upper(.))) %>% 
+                        mutate_all(~case_when(
+                                  grepl('CBT|CAT|COGNITIVE|COGNITIVE|ANALYTIC|COGNATIVE ANALYTIC', .)~'CBT',  
+                                  grepl('DIALECTIC|DBT', .)~'CBT',
+                                  grepl('COMPASSION', .)~'CBT', 
+                                  
+                                  grepl('PSYCHOANALY|ANALYTIC GROUP PSYCHOTHERAPY|ANALYTICAL PSYCHOTHERAPY|PSYCHODYNAMIC|
+                                        PSYCHO DYNAMIC|DYNAMIC|PSYCHODYAMIC|PSYCHODYNAMIX|PYSCHIATRIST|PYSCHOTHERAPY|
+                                        PHYCOLOGY|PSYCHOLOGIST|PSYCOLOGICAL|SCHEMA', .)~'COUNSELLING',
+                                  grepl('TALKING|DISCUSSION', .)~'COUNSELLING',
+                                  grepl('UNDERSTANDING', .)~'COUNSELLING',
+                                  grepl('CHAIR', .)~'COUNSELLING',
+                                  grepl('JUNGIAN', .)~'COUNSELLING',  
+                                  grepl('COUNSELLING', .)~'COUNSELLING',	
+                                  grepl('EMOTIONAL COACHING', .)~'COUNSELLING',		
+                                  grepl('FACE TO FACE WITH A THERAPIST', .)~'COUNSELLING',	
+                                  grepl('MOTIVATIONAL INTERVIEWING', .)~'COUNSELLING',	
+                                  grepl('PSYCHOTHERAPY INCLUDING', .)~'COUNSELLING',
+                                  grepl('ACCEPTANCE|ACT', .)~'COUNSELLING',
+                                  grepl('GESTALT|GESTAULT', .)~'COUNSELLING',
+                                  
+                                  grepl('ART|CRAFT', .)~'ART THERAPY',  
+                                  grepl('EMDR|EMDT|EYEMOVEMENT', .)~'EYE MOVEMENT DESENSITISATION REPROCESSING',
+                                  grepl('HYPNO|HYP', .)~'HYPNOTHERAPY',
+                                  
+                                  grepl('INTEGRATIVE', .)~'INTEGRATIVE PSYCHOTHERAPY',
+                                  grepl('MULTI MODAL', .)~'INTEGRATIVE PSYCHOTHERAPY',	
+                                  grepl('AN INCLUSIVE RANGE', .)~'INTEGRATIVE PSYCHOTHERAPY',	
+                                  grepl('COMBINATION OF TYPES', .)~'INTEGRATIVE PSYCHOTHERAPY',		
+                                  grepl('COMPLEX NEEDS', .)~'INTEGRATIVE PSYCHOTHERAPY',		
+                                  
+                                  grepl('INTERPERSONAL|IPT', .)~'INTERPERSONAL THERAPY',
+                                  
+                                  grepl('MENTALISATION|MBT', .)~'MENTALISATION BASED THERAPY',
+                                  
+                                  grepl('MINDFULNESS|MINDFUL', .)~'MINDFULNESS',
+                                  grepl('MEDITA', .)~'MEDITATION',
+                                  
+                                  grepl('EXERCISE', .)~'EXERCISE',
+                                  
+                                  grepl('PEER SUPPORT', .)~'PEER SUPPORT GROUP',
+                                  grepl('PHYSICAL', .)~'PHYSICAL THERAPY',
+                                  grepl('TAI', .)~'TAICHI',
+                                  
+                                  grepl('HOLISTIC IE A RANGE OF DIFFERENT TECHNIQUES', .)~'MULTI MODAL',		
+                                  grepl('MANSELLS TEAMS', .)~'MANSELLS TEAMS',	
+                                  	
+                                  grepl('MENTAL HEALTH NURSE', .)~'SUPPORT FROM MENTAL HEALTH PROFESSIONAL',	
+                                  grepl('MH PROFESSIONAL', .)~'SUPPORT FROM MENTAL HEALTH PROFESSIONAL',	
+                                  grepl('PERSONALITY DISORDER', .)~'PERSONALITY DISORDER TREATMENT',	
+                                  grepl('CRISIS', .)~'CRISIS',
+                                  grepl('VIA DOCTOR', .)~'DONT KNOW',	
+                                  
+                                  TRUE ~ as.character(.))) %>% 
+                      mutate_all(funs(str_to_sentence(.))) # %>%
+
+for(i in c(1:ncol(type))){tho[[paste0(names(type)[i])]] <- type[[paste0(names(type)[i])]]} 
+
+other_type_values <- str_to_sentence(c('CBT','COUNSELLING'))
+
+tho <- tho %>% 
+            mutate(TT1_Specify_other_main_diagnosis =
+                     factor(ifelse(TT1_Specify_other_main_diagnosis  %in% other_diag_values, TT1_Specify_other_main_diagnosis, 
+                              ifelse(is.na(TT1_Specify_other_main_diagnosis),  TT1_Main_diagnosis, "Other")))) %>%
+  
+            mutate(TT2_Specify_other_main_diagnosis = 
+                     factor(ifelse(TT2_Specify_other_main_diagnosis  %in% other_diag_values, TT2_Specify_other_main_diagnosis, 
+                              ifelse(is.na(TT2_Specify_other_main_diagnosis), TT1_Main_diagnosis, "Other")))) %>%
+  
+            mutate(TT1_Main_diagnosis =
+                     factor(ifelse(TT1_Main_diagnosis!="Other", as.character(TT1_Main_diagnosis),
+                            ifelse(TT1_Main_diagnosis=="Other", as.character(TT1_Specify_other_main_diagnosis), NA)))) %>%
+
+            mutate(TT2_Main_diagnosis = 
+                     factor(ifelse(TT2_Main_diagnosis!="Other", as.character(TT2_Main_diagnosis),
+                            ifelse(TT2_Main_diagnosis=="Other", as.character(TT2_Specify_other_main_diagnosis), NA)))) %>%
+
+            mutate(TT1_Therapy_type = 
+                     factor(ifelse(TT1_Type_of_therapy=="Don't know" | TT1_Type_of_therapy=="Prefer not to answer" | is.na(TT1_Type_of_therapy) |
+                                   TT1_Individual_or_group_therapy=="Don't know" | TT1_Individual_or_group_therapy=="Prefer not to answer" | 
+                                   is.na(TT1_Individual_or_group_therapy)  , NA,
+                            ifelse(TT1_Type_of_therapy!="Other", as.character(TT1_Therapy_type),
+                            ifelse(TT1_Specify_other_type  %in% other_type_values, 
+                                   paste0(as.character(TT1_Individual_or_group_therapy)," ", TT1_Specify_other_type), 
+                            ifelse(is.na(TT1_Specify_other_type),  NA, 
+                                   paste0(as.character(TT1_Individual_or_group_therapy), " Other"))))))) %>%
+  
+            mutate(TT2_Therapy_type = 
+                     factor(ifelse(TT2_Type_of_therapy=="Don't know" | TT2_Type_of_therapy=="Prefer not to answer" | is.na(TT2_Type_of_therapy) |
+                                   TT2_Individual_or_group_therapy=="Don't know" | TT2_Individual_or_group_therapy=="Prefer not to answer" | 
+                                   is.na(TT2_Individual_or_group_therapy)  , NA,
+                            ifelse(TT2_Type_of_therapy!="Other", as.character(TT2_Therapy_type),
+                            ifelse(TT2_Specify_other_type  %in% other_type_values, 
+                                   paste0(as.character(TT2_Individual_or_group_therapy)," ", TT2_Specify_other_type), 
+                            ifelse(is.na(TT2_Specify_other_type),  NA, 
+                                   paste0(as.character(TT2_Individual_or_group_therapy), " Other")))))))
+
+saveRDS(tho, paste0(working_dir, "THO_clean.RDS"))
+
+```
+
+# Clean Demographics 
+
+```{r Load data, eval = T, include = F,  echo = F, warning = F}
+
+dem <-
+  readRDS(paste0(working_dir, "DEM.rds")) %>% 
+  dplyr::select(-contains("_numeric")) %>%
+  dplyr::select(matches("dem|ID|date")) %>%
+  rename_all(funs(str_replace_all(., "dem.", ""))) %>%
+  mutate(DEM_Sign_up_date = as.Date(str_sub(enddate, 1, 11))) %>%
+  mutate(DEM_Ethnicity = factor(ifelse(!is.na(ethnicity) & (ethnicity == "Don't know" |
+                                                        ethnicity == "Prefer not to say" |
+                                                        ethnicity == "Seen but not answered"), NA, as.character(ethnicity)))) %>%
+  mutate(DEM_Ethnicity_binary = factor(ifelse(!is.na(ethnicity) & ethnicity == "White", "White_British",
+                                      ifelse(!is.na(ethnicity) & (ethnicity == "Don't know" |
+                                                                  ethnicity == "Prefer not to say" |
+                                                                  ethnicity == "Seen but not answered"), NA,
+                                      ifelse(!is.na(ethnicity) & ethnicity != "White", "UK_ethnic_minority", NA))), 
+                                      levels = c("UK_ethnic_minority", "White_British"))) %>%
+  mutate(DEM_University_degree = factor(
+                                  ifelse(university == "Yes", "Yes",
+                                  ifelse(university == "No", "No", NA)),
+                                 levels = c("No", "Yes"))) %>%
+
+  mutate(DEM_Sex = factor(
+                           ifelse(sex == "Male", "Male",
+                           ifelse(sex == "Female", "Female", NA)))) %>%
+  dplyr::select(
+    ID,
+    DEM_Sign_up_date,
+    DEM_Age_at_signup = age,
+    DEM_Sex,
+    DEM_Ethnicity,
+    DEM_Ethnicity_binary,
+    DEM_University_degree
+  ) %>%
+  mutate(DEM_Age_at_signup = as.integer(ifelse(DEM_Age_at_signup>100,NA,DEM_Age_at_signup)))
+
+```
+
+# Clean CIDI
+
+```{r cidi symptoms, eval = T, include = F,  echo = F, warning = F}
+
+dep <- readRDS(paste0(working_dir, "CIDID.rds")) %>%
+                       dplyr::select(ID, 
+                                     contains("numeric"),
+                                     contains("_episode"),
+                                     -cidid.longest_episode) %>%
+                       dplyr::select(-contains("prefer_not_to_answer")) %>%
+                       dplyr::select(-contains("dont_know")) %>%
+                       dplyr::select(-contains("text")) %>%
+                       rename_all(funs(str_replace_all(., "_numeric", ""))) #%>%
+
+anx <- readRDS(paste0(working_dir, "CIDIA.rds")) %>%
+                       dplyr::select(
+                         ID,
+                         contains("numeric"),
+                         contains("symptoms"),
+                         contains("age",ignore.case=F),
+                         ) %>%
+                       dplyr::select(-contains("prefer_not_to_answer")) %>%
+                       dplyr::select(-contains("dont_know")) %>%
+                       dplyr::select(-contains("tex")) %>%
+                       rename_all(funs(str_replace_all(., "_numeric", ""))) #
+sym <- merge(
+            dep %>%
+                    na_if(-77) %>% 
+                    na_if(-88) %>% 
+                    na_if(-99) %>%
+                    dplyr::select(
+                         ID,
+                         cidid.low_mood,
+                         cidid.anhedonia,
+                         cidid.weight_change,
+                         cidid.sleep_change,
+                         cidid.fatigue,
+                         cidid.worthlessness,
+                         cidid.trouble_concentrating,
+                         cidid.thoughts_of_death,
+                         cidid.how_often,
+                         cidid.how_long,
+                         cidid.functioning
+                         )  %>%
+                    mutate(cidid.answered =  rowSums(!is.na(.)),
+                          cidid.endorsed = rowSums(. > 0, na.rm = T),
+                          cidid.proportion.endorsed = ifelse(cidid.answered==0, NA, round((cidid.endorsed-1) / (cidid.answered-1),3))) %>%
+                    mutate(cidid.severity = ifelse(cidid.functioning < 0, NA, cidid.functioning * cidid.proportion.endorsed)) %>%
+                    dplyr::select(ID, cidid.severity, cidid.proportion.endorsed, cidid.functioning),
+            
+            anx %>%
+                    na_if(-77) %>% 
+                    na_if(-88) %>% 
+                    na_if(-99) %>%
+                    dplyr::select(
+                         ID,
+                         cidia.on_edge,
+                         cidia.difficulty_concentrating,
+                         cidia.irritable,
+                         cidia.tense_muscles,
+                         cidia.trouble_sleeping,
+                         cidia.worry_stronger_than_others,
+                         cidia.most_days,
+                         cidia.longest_period_worry_categorical,
+                         cidia.more_than_one_thing,
+                         cidia.different_worries,
+                         cidia.difficult_to_control,
+                         cidia.difficult_to_stop,
+                         cidia.couldnt_stop,
+                         cidia.functioning
+                         ) %>%
+                    mutate(cidia.longest_period_worry_categorical - 1)  %>%
+                    mutate(cidia.answered =  rowSums(!is.na(.)),
+                          cidia.endorsed = rowSums(. > 0, na.rm = T),
+                          cidia.proportion.endorsed = ifelse(cidia.answered==1, NA, round((cidia.endorsed-1) / (cidia.answered-1),3))) %>%
+                    mutate(cidia.severity = ifelse(cidia.functioning < 0, NA, cidia.functioning * cidia.proportion.endorsed)) %>%
+                    dplyr::select(ID, cidia.severity, cidia.proportion.endorsed, cidia.functioning),
+                    
+          by = "ID") %>%
+
+                mutate(
+                      SEV_Lifetime_severity =     ifelse(!is.na(cidid.severity) & 
+                                                         !is.na(cidia.severity) &
+                                                                cidid.severity >= cidia.severity, 
+                                                                cidid.severity,
+                                                  ifelse(!is.na(cidid.severity) & 
+                                                         !is.na(cidia.severity) &
+                                                                cidid.severity <= cidia.severity, 
+                                                                cidia.severity,
+                                                  ifelse(!is.na(cidid.severity) & 
+                                                          is.na(cidia.severity), 
+                                                                cidid.severity,
+                                                  ifelse(is.na(cidid.severity) & 
+                                                         !is.na(cidia.severity), 
+                                                                cidia.severity, NA)))),
+                      SEV_Lifetime_symptoms =
+                                                  ifelse(!is.na(cidid.proportion.endorsed) & 
+                                                         !is.na(cidia.proportion.endorsed) &
+                                                                cidid.proportion.endorsed >= cidia.proportion.endorsed, 
+                                                                cidid.proportion.endorsed,
+                                                  ifelse(!is.na(cidid.proportion.endorsed) & 
+                                                         !is.na(cidia.proportion.endorsed) &
+                                                                cidid.proportion.endorsed <= cidia.proportion.endorsed, 
+                                                                cidia.proportion.endorsed,
+                                                  ifelse(!is.na(cidid.proportion.endorsed) & 
+                                                          is.na(cidia.proportion.endorsed), 
+                                                                cidid.proportion.endorsed,
+                                                  ifelse(is.na(cidid.proportion.endorsed) & 
+                                                         !is.na(cidia.proportion.endorsed), 
+                                                                cidia.proportion.endorsed, NA)))),
+                      SEV_Lifetime_score = SEV_Lifetime_symptoms * SEV_Lifetime_severity) %>%
+                
+         dplyr::select(
+                 ID,
+                 SEV_Lifetime_severity,
+                 SEV_Lifetime_symptoms,
+                 SEV_Lifetime_score,
+                 SEV_Lifetime_depression_severity = cidid.functioning,
+                 SEV_Lifetime_depression_symptoms = cidid.proportion.endorsed,
+                 SEV_Lifetime_depression_score = cidid.severity,
+                 SEV_Lifetime_anxiety_severity  = cidia.functioning,
+                 SEV_Lifetime_anxiety_symptoms  = cidia.proportion.endorsed,
+                 SEV_Lifetime_anxiety_score  = cidia.severity)
+                
+
+cidi <- as.data.frame(plyr::join_all(list(anx, dep, sym), by = "ID", type = "left"))  %>%
+        na_if(-77) %>% na_if(-88) %>% na_if(-99) %>%
+        mutate(SEV_Age_of_onset =  as.integer(ifelse(is.na(cidia.age_at_onset), cidid.age_first_episode,
+                                         ifelse(is.na(cidid.age_first_episode), cidia.age_at_onset,
+                                         ifelse(cidia.age_at_onset < cidid.age_first_episode, cidia.age_at_onset,
+                                         ifelse(cidid.age_first_episode < cidia.age_at_onset, cidid.age_first_episode, NA)))))) %>% 
+        mutate(SEV_Age_recent_episode = as.integer( ifelse(is.na(cidia.age_at_last_episode), cidid.age_last_episode,
+                                         ifelse(is.na(cidid.age_last_episode), cidia.age_at_last_episode,
+                                         ifelse(cidia.age_at_last_episode > cidid.age_last_episode, 
+                                         cidia.age_at_last_episode, cidid.age_last_episode))))) %>%
+        mutate(SEV_Number_of_episodes = as.integer(ifelse(is.na(cidia.how_many_episodes_estimated), cidid.episodes,
+                                         ifelse(is.na(cidid.episodes), cidia.how_many_episodes_estimated,
+                                         ifelse(cidia.how_many_episodes_estimated > cidid.episodes, 
+                                         cidia.how_many_episodes_estimated, cidid.episodes))))) %>%
+        dplyr::select(ID, contains('TRE.'), contains("SEV_")) %>%
+        mutate(ID = as.character(ID)) %>%
+        mutate( SEV_Age_of_onset =       ifelse(SEV_Age_of_onset < 5, 5, SEV_Age_of_onset)) %>%
+        mutate( SEV_Age_recent_episode = ifelse(SEV_Age_recent_episode < SEV_Age_of_onset, NA,
+                                                SEV_Age_recent_episode))
+
+```
+
+
+# Merge cleaned datasets
+
+```{r merge and add final vars, eval = T, include = F,  echo = F, warning = F}
+
+#df <- as.data.frame(plyr::join_all(list(tho, dem, cidi, gad, phq, sas), by = "ID", type = "left")) 
+
+df <- as.data.frame(plyr::join_all(list(dem, cidi, gad, phq, sas, tho), by = "ID", type = "left")) %>%
+        
+        mutate_if(is.character, funs(as.factor(str_to_sentence(.)))) %>%
+
+        mutate(SEV_Age_recent_episode = ifelse((SEV_Current_depression_score > 9 | 
+                                                SEV_Current_anxiety_score > 9) & (SEV_Age_recent_episode < DEM_Age_at_signup), 
+                                                DEM_Age_at_signup, SEV_Age_recent_episode)) %>%
+        
+        mutate(TT1_Age_during_therapy = ifelse(TT1_Age_during_therapy < SEV_Age_of_onset, NA,  TT1_Age_during_therapy)) %>%
+
+        mutate(TT1_Years_since_therapy = DEM_Age_at_signup - TT1_Age_during_therapy) %>%
+  
+        mutate(TT1_Duration_of_illness = ifelse(SEV_Age_of_onset <= TT1_Age_during_therapy,  
+                                                TT1_Age_during_therapy - SEV_Age_of_onset,  NA)) %>%
+  
+        mutate(TT1_Duration_of_illness = ifelse(TT1_Duration_of_illness < 0, NA, TT1_Duration_of_illness)) %>%
+  
+        mutate(TT1_Time_since_therapy = factor(
+                                            ifelse(
+                                                !is.na(TT1_Years_since_therapy) & TT1_Years_since_therapy < -3, NA,
+                                            ifelse(!is.na(TT1_Years_since_therapy) & TT1_Years_since_therapy < 1, "Less than 1 year ago",
+                                            ifelse(!is.na(TT1_Years_since_therapy) & TT1_Years_since_therapy < 3, "1-2 years ago",
+                                            ifelse(!is.na(TT1_Years_since_therapy) & TT1_Years_since_therapy < 6, "3-5 years ago",
+                                            ifelse(!is.na(TT1_Years_since_therapy) & TT1_Years_since_therapy < 10, "6-9 years ago",
+                                            ifelse(!is.na(TT1_Years_since_therapy) & TT1_Years_since_therapy < 16, "10-15 years ago", NA)))))))) %>%
+        
+        mutate(TT1_Years_since_therapy =  ifelse(
+                                            !is.na(TT1_Years_since_therapy) & TT1_Years_since_therapy < -3,  NA,  TT1_Years_since_therapy)) %>%
+        
+        mutate(TT2_Years_since_therapy = DEM_Age_at_signup - TT2_Age_during_therapy) %>%
+  
+        mutate(TT2_Duration_of_illness = TT2_Age_during_therapy - SEV_Age_of_onset) %>%
+  
+        mutate(TT2_Time_since_therapy = factor(ifelse(!is.na(TT2_Years_since_therapy) & TT2_Years_since_therapy < -3,   NA,
+                                        ifelse(!is.na(TT2_Years_since_therapy) &  TT2_Years_since_therapy < 1, "Less than 1 year ago",
+                                        ifelse(!is.na(TT2_Years_since_therapy) &  TT2_Years_since_therapy < 3, "1-2 years ago",
+                                        ifelse(!is.na(TT2_Years_since_therapy) &  TT2_Years_since_therapy < 6,  "3-5 years ago", 
+                                        ifelse(!is.na(TT2_Years_since_therapy) &  TT2_Years_since_therapy < 10, "6-9 years ago",
+                                        ifelse(!is.na(TT2_Years_since_therapy) &  TT2_Years_since_therapy < 16, "10-15 years ago",  NA)))))))) %>%
+  
+        mutate(TT2_Years_since_therapy =  ifelse(!is.na(TT2_Years_since_therapy) & TT2_Years_since_therapy < -3,  NA, TT2_Years_since_therapy))  %>%
+      
+        mutate(THO_Days_since_signup = as.numeric(THO_Start_date - DEM_Sign_up_date)) %>%
+        
+        mutate(THO_Years_since_signup = round(THO_Days_since_signup / 365, 1)) %>%
+        
+        mutate(THO_Timing_of_therapy_relative_to_signup =  factor(
+                                              ifelse(TT1_Years_since_therapy > THO_Years_since_signup, "Therapy prior to sign up",
+                                              ifelse(TT1_Years_since_therapy == THO_Years_since_signup, "Concurrent",
+                                              ifelse(TT1_Years_since_therapy < THO_Years_since_signup, "Therapy since sign up", NA))),
+                                              levels = c("Therapy prior to sign up", "Concurrent", "Therapy since sign up"))) %>% 
+        
+        mutate_if(is.factor, funs(as.factor(str_to_sentence(.)))) %>%
+
+        mutate(THO_Participation = factor(
+                                    ifelse(is.na(SCR_First_therapy), "Did not participate",
+                                    ifelse((TT1_Years_since_therapy > -2 & TT1_Years_since_therapy < 6) &
+                                          (TT1_Main_diagnosis=="Anxiety" | TT1_Main_diagnosis=="Depression" |
+                                           TT1_Main_diagnosis=="Social anxiety" | TT1_Main_diagnosis=="Panic fear or phobia" |
+                                           TT1_Main_diagnosis=="Panic attacks" | TT1_Main_diagnosis=="Fear or phobia") &
+                                          (TT1_Therapy_type=="Individual cbt" | TT1_Therapy_type=="Individual counselling") &
+                                          !is.na(TT1_Self_reported_change),
+                                          "Included", "Excluded")))) %>%
+  
+        mutate(TT1_Therapy_type = recode_factor(TT1_Therapy_type, 
+                                                          `Group cbt` = "Group",
+                                                          `Group counselling` = "Group",
+                                                          `Group other` = "Group"
+                                                           )) %>%
+        
+        mutate(TT1_Therapy_type = relevel(TT1_Therapy_type, "Individual cbt")) %>%
+  
+        mutate(TT1_Main_diagnosis = recode_factor(TT1_Main_diagnosis, 
+                                                          `Panic attacks` = "Panic fear or phobia",
+                                                          `Fear or phobia` = "Panic fear or phobia",
+                                                          `Social anxiety` = "Panic fear or phobia",
+                                                          `Post traumatic stress disorder` = "Other",
+                                                          `Personality disorder` = "Other",
+                                                          `Bipolar disorder` = "Other",
+                                                          `Eating disorder` = "Other",
+                                                          `Prefer not to answer` = "Other",
+                                                          `Don't know` = "Other"
+                                                          )) %>%
+       
+        mutate(TT1_Main_diagnosis = relevel(TT1_Main_diagnosis, "Depression")) %>%
+
+        droplevels() %>%
+
+        mutate(TT1_Self_reported_change_numeric = as.numeric(
+                                                          recode_factor(TT1_Self_reported_change, 
+                                                          `Much worse` = -2,
+                                                          `A little worse` = -1,
+                                                          `No change` = 0,
+                                                          `A little better` = 1, 
+                                                          `Much better` = 2,
+                                                          .ordered = TRUE))) %>%
+  
+        mutate(TT1_Self_reported_improvement_numeric = recode_factor(TT1_Self_reported_improvement, 
+                                                          `No` = 0,
+                                                          `Yes` = 1
+                                                          )) %>%
+  
+        mutate(SEV_Currently_in_remission = ifelse(SEV_Current_anxiety_score > 9 | SEV_Current_depression_score > 9,
+                                                   "No", "Yes"))
+
+  
+test <- df %>%
+          dplyr::select("ID",
+                        "TT1_Self_reported_change",
+                        "TT1_Years_since_therapy",
+                        "TT1_Main_diagnosis",
+                        "TT1_Therapy_type",
+                        "TT1_Concurrent_medications",
+                        "SCR_First_therapy",
+                        "SCR_Regular_therapeutic_activity",
+                        "SEV_Age_of_onset",
+                        "SEV_Number_of_episodes",
+                        "TT1_Number_of_comorbidities",
+                        "SEV_Personality_disorder_score",
+                        "TT1_Age_during_therapy",
+                        "DEM_Sex",
+                        "DEM_Ethnicity_binary",
+                        "DEM_University_degree") 
+
+test <- test %>%
+          mutate(THO_Missing_data =  factor(ifelse(rowSums(is.na(.)) > 0, "Missing analysis data", "Complete data"))) %>%
+          select("ID","THO_Missing_data")
+
+saveRDS(df, paste0(working_dir, "THO_FULL_ANALYSIS_DATASET.RDS"))
+
+```
+
+
+# Dataset for tables
+
+```{r LOAD DATA, eval = T, include = F,  echo = F, warning = F}
+
+df <- readRDS(paste0(working_dir,"THO_FULL_ANALYSIS_DATASET.RDS")) %>% dplyr::select(-ID)
+
+df <- df %>%
+          filter(THO_Participation=="Included") %>%
+          dplyr::select(  #"ID",
+                        "TT1_Self_reported_change",
+                        "TT1_Years_since_therapy",
+                        "TT1_Main_diagnosis",
+                        "TT1_Therapy_type",
+                        "TT1_Concurrent_medications",
+                        "SCR_First_therapy",
+                        "SCR_Regular_therapeutic_activity",
+                        "SEV_Age_of_onset",
+                        "SEV_Number_of_episodes",
+                        "TT1_Number_of_comorbidities",
+                        "SEV_Personality_disorder_score",
+                        "TT1_Age_during_therapy",
+                        "DEM_Sex",
+                        "DEM_Ethnicity_binary",
+                        "DEM_University_degree") %>%
+         filter(!is.na(TT1_Self_reported_change)) %>%
+         filter(!is.na(TT1_Years_since_therapy)) %>%
+         mutate(THO_Missing_data = factor(ifelse(rowSums(is.na(.)) > 0, "Missing analysis data", "Complete data")))  %>%
+         mutate(TT1_Therapy_type = recode_factor(TT1_Therapy_type,
+                                                   `Individual cbt` = "Individual_cbt",
+                                                   `Individual counselling` = "Individual_counselling",
+                                                   `Individual other` = "Individual_other")) %>%
+         mutate(TT1_Therapy_type = relevel(TT1_Therapy_type, "Individual_cbt")) %>%
+         mutate(TT1_Main_diagnosis = recode_factor(TT1_Main_diagnosis,  `Panic fear or phobia` = "Panic_fear_or_phobia")) %>%
+         mutate(TT1_Main_diagnosis = relevel(TT1_Main_diagnosis, "Depression"))
+
+saveRDS(df, paste0(working_dir, "THO_ANXDEP_ANALYSIS_DATASET.RDS"))
+
+```
+
+
+```{r "table by function",  echo = F, warning = F }
+
+table_by_strat <- function(dat, outcomes, strata){
+  return(
+    kable(
+    summary(
+      tableby(as.formula(paste(strata, paste(outcomes, collapse = " + "), sep = " ~ ")), 
+              data = dat, 
+              control = tableby.control(numeric.test = "anova", 
+                                        cat.test = "chisq",
+                                        numeric.stats = c("meansd","median", "range", "Nmiss"),
+                                        cat.stats = c("countpct","Nmiss"),
+                                        stats.labels = list(meansd = "Mean (SD)", 
+                                                            median = "Median",
+                                                            range = "Range",
+                                                            countpct = "N (%)", 
+                                                            Nmiss = "Missing data")),
+                                        digits = 1, 
+                                        digits.pct = 0,
+                                        pfootnote = T),
+      labelTranslations = data_label_list, 
+      test = T)
+    )
+  )
+}
+
+# Variable for stratified analysis
+strat_sex <- "DEM_Sex"
+strat_missing <- "THO_Missing_data"
+strat_participation <- "THO_Participation"
+
+labs <- paste(names(df), sep = ",") %>% 
+        str_replace_all(., "_", " ") %>%
+        str_sub(., 5, -1) %>%
+        str_to_sentence(.)
+
+lab_list <- list()
+
+for (v in 1:length(df)) { lab_list[[paste(names(df)[v])]] <- paste(lab_list)[v] }
+
+```
+
+
+### Prognostic outcomes {.tabset}
+
+#### by data
+
+```{r "Table Outcomes",  echo = F, warning = F }
+
+out <- c("TT1_Self_reported_change")
+
+table_by_strat(df %>% filter(THO_Participation!="Did not participate"), out, strat_missing)
+
+```
+
+#### by sex
+
+```{r "Table Outcomes",  echo = F, warning = F }
+
+table_by_strat(df %>% filter(THO_Participation!="Did not participate"), out, strat_sex)
+
+```
+
+### Therapy & Clinical factors 
+
+```{r Table. Most recent talking therapy , eval = T, include = T,  echo = F, warning = F}
+
+cov <- c(
+  "TT1_Age_during_therapy",
+  "TT1_Years_since_therapy",
+  "TT1_Therapy_type" ,
+  "TT1_Main_diagnosis" ,
+  "TT1_Comorbid_Depression",
+  "TT1_Comorbid_Panic",
+  "TT1_Comorbid_Fear",
+  "TT1_Comorbid_Social",
+  "TT1_Comorbid_Anxiety",
+  "TT1_Comorbid_Other",
+  "TT1_Number_of_comorbidities",
+  "TT1_Concurrent_medications",
+  "SCR_First_therapy",
+  "SCR_Regular_therapeutic_activity" ,
+  "SEV_Age_of_onset",
+  "SEV_Number_of_episodes",
+  "SEV_Personality_disorder_score"
+)
+
+table_by_strat(df %>% filter(THO_Participation!="Did not participate"), cov, strat_sex)
+
+table_by_strat(df %>% filter(THO_Participation!="Did not participate"), cov, strat_missing)
+
+table_by_strat(df %>% filter(THO_Participation!="Did not participate"), cov, strat_participation)
+
+```
+
+
+### Sociodemographics
+
+```{r Table Sociodemographics, eval = T, include = T,  echo = F, warning = F}
+
+soc_desc <- c(
+  "TT1_Age_during_therapy",
+  "DEM_Sex",
+  "DEM_Ethnicity",
+  "DEM_University_degree"
+)
+
+table_by_strat(df %>% filter(THO_Participation!="Did not participate"), soc_desc, strat_participation)
+
+```
+
+
+### Correlations between prognostic factors {.tabset}
+
+```{r "Correlations between analysis variables", include = T,  echo = F, warning = F, error = F, message = F}
+
+corvars <-  c( 
+            "TT1_Years_since_therapy",
+            "TT1_Age_during_therapy",
+            "DEM_Sex",
+            "DEM_Ethnicity_binary",
+            "DEM_University_degree",
+            "SEV_Age_of_onset",
+            "SEV_Number_of_episodes",
+            "TT1_Number_of_comorbidities",
+            "SEV_Personality_disorder_score",
+            "TT1_Therapy_type" ,
+            "TT1_Main_diagnosis" ,
+            "TT1_Concurrent_medications",
+            "SCR_First_therapy",
+            "SCR_Regular_therapeutic_activity"
+)
+
+cormat <- function(data) {
+  cordat <- data
+  names(cordat) <- str_replace_all(names(cordat), "_", " ")
+  names(cordat) <- str_replace_all(names(cordat), "\\.", " ")
+  names(cordat) <- str_sub(names(cordat),5,-1)
+  hetcormat <-
+    polycor::hetcor(
+      cordat,
+      ML = TRUE,
+      std.err = TRUE,
+      use = "p",
+      digits = 2
+    )
+  return(hetcormat)
+}
+
+rmat <- function(cormat) {
+  
+  rmat <- round(cormat[["correlations"]], 2)
+  write.table(
+    rmat,
+    "correlation_matrix.csv",
+    col.names = FALSE,
+    row.names = FALSE,
+    sep = ","
+  )
+  return(rmat)
+  }
+
+rplot <- function(rmat)
+  return(
+  heatmaply::heatmaply_cor(
+    rmat,
+    dendogram = "none",
+    fontsize_col = 8,
+    fontsize_row = 8,
+    file = "heatmaply_plot.html"
+  )
+  )
+
+get_lower <- function(matrix){matrix[upper.tri(matrix)] <- NA; return(matrix) }
+  
+rtab <- function(cormat) {
+    cor <- round(cormat[["correlations"]], 2)
+    se <- round(cormat[["std.errors"]], 3)
+    #p <- cormat$tests
+    cormat_lower <- get_lower(cor)
+    semat_lower <- get_lower(se)
+    #pvmat_lower <- get_lower(p)
+    cortab <- reshape2::melt(cormat_lower)
+    setab <- reshape2::melt(semat_lower)
+    #pvmat <- reshape2::melt(pvmat_lower)
+    cortab$r <- cortab$value
+    cortab$se <- setab$value
+    #cormat$p <- pvmat$value
+    cortab <- cortab[, c("Var1", "Var2", "r", "se")][which(!is.na(cortab$r)),]
+    cortab <- cortab[which(cortab$Var1!=cortab$Var2),]
+    
+    return(DT::datatable(cortab))
+}
+
+cors <- cormat(data[,corvars])
+r <- rmat(cors)
+plot <- rplot(r)
+tab <- rtab(cors)
+
+```
+
+#### Matrix
+
+```{r "Correlation Matrix", eval = T, include = T,   echo = F, warning = F, error = F, message = F, fig.width = 10, fig.height = 8, fig.fullwidth = T, fig.align = 'center'}
+
+rplot(r)
+
+```
+
+#### Table
+
+```{r "Correlation Table", eval = T, include = T,  echo = F, warning = F, error = F, message = F, fig.width = 10, fig.height = 6, fig.fullwidth = T, fig.align = 'center'}
+
+rtab(cors)
+
+```
+
+#### Independent tests
+
+```{bash "CALCULATE NUMBER OF INDEPENDENT TESTS", eval = T, include = T,  echo = F, warning = F}
+# modified from github.com/hagax8/independent_tests
+# install anaconda on local machine: anaconda.com/distribution
+# install sklearn in python
+# from the command line: pip install scikit-learn==0.21.3
+
+echo 'from sklearn.decomposition import PCA
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+import numpy as np
+from sys import argv
+
+def internal_dimension(data,percentage=0.995):
+       pca = PCA(random_state=42, n_components=percentage)
+       data = pca.fit_transform(data)
+       return(pca.n_components_)
+
+def bonferroni_cutoff(filename):
+    data = np.genfromtxt(filename, delimiter=",", dtype=np.float64)
+    imp = SimpleImputer(strategy="median")
+    data = imp.fit_transform(data)
+    scaler = StandardScaler()
+    data = scaler.fit_transform(data)
+    ndims = internal_dimension(data)
+    indep_tests = (ndims*ndims-ndims)/2
+    indep_tests_pvalue = 0.05/indep_tests
+    print("Number of effectively independent tests: %s" % (ndims))
+    return(indep_tests_pvalue)
+    
+def main():
+     indep = bonferroni_cutoff(argv[1])
+
+if __name__ == "__main__":
+     main()
+' > independent_tests.py
+
+echo '
+import independent_tests as indep
+from sys import argv
+
+indep.bonferroni_cutoff(argv[1])
+ 
+' > run_independent.py
+
+/anaconda3/bin/python \
+run_independent.py \
+"correlation_matrix.csv"
+
+```
+
+```{r "NUMBER OF INDEPENDENT TESTS", include = F,  echo = F, warning = F}
+# Number of independent variables as detailed above
+n_tests = 14
+Bonf = round((0.05 / n_tests), 4)
+```
+
+
+
+```{r "Correlations between analysis variables", include = T,  echo = F, warning = F, error = F, message = F}
+
+dum  <- df %>% dplyr::select_if(~ nlevels(.) > 2)
+c <- fastDummies::dummy_cols(data, select_columns = c(paste(names(dum), sep = ",")))
+c <- c %>% dplyr::select(-contains('_NA'))
+c <- c[, !(names(c) %in% names(dum))]
+
+cors <- cormat(c)
+r <- rmat(cors)
+plot <- rplot(r)
+tab <- rtab(cors)
+
+str(data)
+
+```
+
+
+#### Matrix
+
+```{r "Correlation Matrix", eval = T, include = T,   echo = F, warning = F, error = F, message = F, fig.width = 10, fig.height = 8, fig.fullwidth = T, fig.align = 'center'}
+
+rplot(r)
+
+```
+
+#### Table
+
+```{r "Correlation Table", eval = T, include = T,  echo = F, warning = F, error = F, message = F, fig.width = 10, fig.height = 6, fig.fullwidth = T, fig.align = 'center'}
+
+rtab(cors)
+
+```
+
